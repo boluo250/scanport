@@ -61,7 +61,7 @@ def loadTmpJson():
 	return ip_info_dict
 
 
-def parsePort(ip, port_info_list, share_write_json_dict, share_lock):
+def parsePort(ip, port_info_list, share_write_json_list, share_lock):
 
 	
 	port_list = []
@@ -74,57 +74,76 @@ def parsePort(ip, port_info_list, share_write_json_dict, share_lock):
 	
 	ret = nm.scan(hosts=ip,ports="%s" % port_str,arguments="%s" % g_nmap_args) #only -v run very fast
 
-	for host in nm.all_hosts():
-		print(host,nm[host].hostname(),nm[host].state())
-		print(nm[host])
-		if nm[host].state() == "up":
-			
-			
-			if host in share_write_json_dict:
-				pass
-			else:
-				share_write_json_dict[host] = ""
-			"""
-			print(nm[host].tcp(6000))
-			print(nm[host].tcp(135))
-			print(nm[host].tcp(123))
-			print(nm[host]["addresses"]["mac"])
-			print(nm[host].tcp(6000)["name"])
-			print(nm[host].tcp(6000)["version"])
+	#for host in nm.all_hosts():
+	nmap_ip_info = nm[ip]
+	print(ip,nmap_ip_info.hostname(),nmap_ip_info.state())
+	print(nmap_ip_info)
+	#print(nm.csv())
 
-			"""
+	if nmap_ip_info.state() == "up":
+
+		my_port_list = []
+
+		for proto in nmap_ip_info.all_protocols():
+			for port in nmap_ip_info[proto].keys():
+				if nmap_ip_info[proto][port]["state"] == "open":
+					my_port_dict = {}
+					my_port_dict["port"] = port
+					my_port_dict["server"] = nmap_ip_info[proto][port]["name"]
+					my_port_dict["version"] = nmap_ip_info[proto][port]["version"]
+					my_port_dict["protocol"] = proto
+					my_port_list.append(my_port_dict)
+
+		if my_port_list:
+			my_ip_dict = {}
+			my_ip_dict["ip"] = ip
+			my_ip_dict["mac"] = nmap_ip_info["addresses"]["mac"]
+			my_ip_dict["discoveryTime"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+			my_ip_dict["os"] = nmap_ip_info["osmatch"][0]["name"]
+			my_ip_dict["osVersion"] = ""
+			my_ip_dict["taskId"] = ""
+			my_ip_dict["ports"] = my_port_list
+
+			share_lock.acquire()
+			share_write_json_list.append(my_ip_dict)
+			share_lock.release()
+
+
+
 @timer
 def mutilProcessRun(ip_info_dict):
 
-	share_write_json_dict = multiprocessing.Manager().dict()
+	share_write_json_list = multiprocessing.Manager().list()
 	share_lock = multiprocessing.Manager().Lock()
 
 	print("cpu num: %d" % multiprocessing.cpu_count())
 	pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
 	for ip, port_info_list in ip_info_dict.items():
 
-		pool.apply_async(parsePort, (ip, port_info_list,share_write_json_dict, share_lock, ))
+		pool.apply_async(parsePort, (ip, port_info_list,share_write_json_list, share_lock, ))
 
 	pool.close()
 	pool.join()
 
-	print(share_write_json_dict)
+	print(share_write_json_list)
 
-	return share_write_json_dict
+	return share_write_json_list
+
+@timer
+def writeJsonFile(share_write_json_list):
+
+	now_time = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+	json_file = "%s.json" % now_time
+	with open(json_file, "w") as f:
+		json.dump(list(share_write_json_list), f)
 
 @timer
 def main():
 
-	#begin_time = datetime.datetime.now()
-
 	#scanPort()
 	ip_info_dict = loadTmpJson()
-	share_write_json_dict = mutilProcessRun(ip_info_dict)
-
-	#end_time = datetime.datetime.now()
-
-	#run_time = "\nrun time: %ss" % (end_time-begin_time).seconds
-	#print(togreen(run_time))
+	share_write_json_list = mutilProcessRun(ip_info_dict)
+	writeJsonFile(share_write_json_list)
 
 if __name__ == '__main__':
 	main()
