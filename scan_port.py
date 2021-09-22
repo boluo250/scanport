@@ -12,9 +12,20 @@ g_masscan_args = "-p 1-10000 --rate 20000"
 g_nmap_args = "-v -O"
 g_nic = "wlp2s0"
 g_process_num = multiprocessing.cpu_count()
+g_task_id_pathname = "/data/nettraffic/etc/taskid"
+
 
 tored = lambda s: "\033[1;31m%s\033[0m" % s
 togreen = lambda s: "\033[1;32m%s\033[0m" % s
+
+
+def getTaskId():
+	f = open(g_task_id_pathname, "r")
+	line = f.readline()
+	task_id = line.rstrip("\n").rstrip("\r\n")
+
+	return int(task_id)
+	
 
 
 def getVlan(nic):
@@ -78,7 +89,7 @@ def loadTmpJson():
 	return ip_info_dict
 
 
-def parsePort(ip, port_info_list, share_write_json_list, share_lock):
+def parsePort(ip, port_info_list, share_write_json_list, share_lock, task_id):
 
 	
 	port_list = []
@@ -118,7 +129,7 @@ def parsePort(ip, port_info_list, share_write_json_list, share_lock):
 			my_ip_dict["discoveryTime"] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 			my_ip_dict["os"] = nmap_ip_info["osmatch"][0]["name"]
 			my_ip_dict["osVersion"] = ""
-			my_ip_dict["taskId"] = ""
+			my_ip_dict["taskId"] = task_id
 			my_ip_dict["ports"] = my_port_list
 
 			share_lock.acquire()
@@ -128,7 +139,7 @@ def parsePort(ip, port_info_list, share_write_json_list, share_lock):
 
 
 @timer
-def mutilProcessRun(ip_info_dict):
+def mutilProcessRun(ip_info_dict, task_id):
 
 	share_write_json_list = multiprocessing.Manager().list()
 	share_lock = multiprocessing.Manager().Lock()
@@ -137,7 +148,7 @@ def mutilProcessRun(ip_info_dict):
 	pool = multiprocessing.Pool(processes=g_process_num)
 	for ip, port_info_list in ip_info_dict.items():
 
-		pool.apply_async(parsePort, (ip, port_info_list,share_write_json_list, share_lock, ))
+		pool.apply_async(parsePort, (ip, port_info_list,share_write_json_list, share_lock, task_id, ))
 
 	pool.close()
 	pool.join()
@@ -150,7 +161,8 @@ def mutilProcessRun(ip_info_dict):
 def writeJsonFile(share_write_json_list):
 
 	now_time = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-	json_file = "%s.json" % now_time
+	json_file = "/opt/data/asset/%s.json" % now_time
+	print(json_file)
 	with open(json_file, "w") as f:
 		json.dump(list(share_write_json_list), f)
 
@@ -158,10 +170,11 @@ def writeJsonFile(share_write_json_list):
 def main():
 
 	valn = getVlan(g_nic)
+	task_id = getTaskId()
 	scanPort(valn)
-	#ip_info_dict = loadTmpJson()
-	#share_write_json_list = mutilProcessRun(ip_info_dict)
-	#writeJsonFile(share_write_json_list)
+	ip_info_dict = loadTmpJson()
+	share_write_json_list = mutilProcessRun(ip_info_dict, task_id)
+	writeJsonFile(share_write_json_list)
 
 
 
